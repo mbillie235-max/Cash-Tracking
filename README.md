@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Tracker — TRK demo</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Roboto, "Segoe UI", Arial; padding: 28px; background:#f7f9fb; color:#111; }
+    header{ display:flex; align-items:center; gap:16px; margin-bottom:20px;}
+    h1{ margin:0; font-size:20px; }
+    .card { background: #fff; border-radius:10px; padding:16px; box-shadow: 0 6px 18px rgba(20,30,60,0.06); margin-bottom:16px; }
+    label{ display:block; margin:8px 0 4px; font-weight:600; font-size:13px; }
+    input[type="text"]{ width:100%; padding:10px 12px; border-radius:8px; border:1px solid #d6dbe6; font-size:15px; }
+    button{ margin-top:10px; padding:10px 14px; border-radius:8px; border:0; cursor:pointer; font-weight:600; }
+    .btn-primary{ background:#1155cc; color:#fff; }
+    .btn-ghost{ background:#eef3ff; color:#1155cc; margin-left:8px; }
+    .muted{ color:#6b7280; font-size:13px; }
+    .timeline{ margin-top:12px; border-left:3px solid #e2e8f0; padding-left:12px; }
+    .event{ margin:12px 0; padding-left:8px; }
+    .event time{ display:block; font-size:12px; color:#6b7280; }
+    .ok{ color: #0b6623; font-weight:700; }
+    .warn{ color:#b45309; font-weight:700; }
+    .err{ color:#b91c1c; font-weight:700; }
+    .flex{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .small{ font-size:13px; color:#374151; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' rx='8' fill='%231155cc'/><text x='50%' y='55%' font-family='Arial' font-size='18' fill='white' text-anchor='middle' alignment-baseline='middle'>TR</text></svg>" alt="logo" style="width:40px;height:40px;border-radius:6px;">
+    <div>
+      <h1>Simple Tracking Page</h1>
+      <div class="muted">Paste a tracking number or generate one — example: <strong>TRK-20251103-482913-7</strong></div>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="flex" style="align-items:flex-start;">
+      <div style="flex:1;">
+        <label for="trkInput">Enter tracking number</label>
+        <input id="trkInput" placeholder="e.g. TRK-20251103-482913-7" />
+        <div style="margin-top:8px;">
+          <button id="checkBtn" class="btn-primary">Track</button>
+          <button id="genBtn" class="btn-ghost">Generate new</button>
+        </div>
+        <div id="msg" class="small" style="margin-top:8px"></div>
+      </div>
+
+      <div style="width:260px;">
+        <div style="font-size:13px; color:#374151; margin-bottom:8px">Quick info</div>
+        <div class="card" style="padding:12px; background:#fbfdff;">
+          <div class="small"><strong>Format</strong></div>
+          <div class="muted">TRK-YYYYMMDD-XXXXXX-C</div>
+          <div style="height:8px;"></div>
+          <div class="small"><strong>Example</strong></div>
+          <div class="muted">TRK-20251103-482913-7</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="result" class="card" style="display:none;">
+    <h2 id="resTitle" style="margin-top:0;font-size:17px">Tracking details</h2>
+    <div id="resMeta" class="muted small">Status and timeline for: <span id="resTrk"></span></div>
+    <div id="timeline" class="timeline"></div>
+  </section>
+
+  <script>
+    // ---- Luhn checksum functions (same logic used earlier) ----
+    function luhnChecksumDigit(numStr){
+      const digits = numStr.split('').map(Number);
+      let sum = 0;
+      const parity = digits.length % 2;
+      for (let i = 0; i < digits.length; i++) {
+        let d = digits[i];
+        if (i % 2 === parity) {
+          d = d * 2;
+          if (d > 9) d -= 9;
+        }
+        sum += d;
+      }
+      return (10 - (sum % 10)) % 10;
+    }
+
+    function validateTrackingNumber(trk){
+      const m = trk.match(/^TRK-(\d{8})-(\d{6})-(\d)$/);
+      if (!m) return { ok:false, reason: 'Invalid format. Use TRK-YYYYMMDD-XXXXXX-C' };
+      const numeric = m[1] + m[2];
+      const expected = luhnChecksumDigit(numeric).toString();
+      if (expected !== m[3]) return { ok:false, reason: 'Checksum does not match (possible typo)' };
+      return { ok:true, date: m[1], random: m[2] };
+    }
+
+    // ---- Simulated shipment database (client-side) ----
+    // Pre-populated with the tracking number generated for you
+    const shipments = {
+      // key: tracking number -> array of events (newest last)
+      "TRK-20251103-482913-7": {
+        status: "Out for delivery",
+        timeline: [
+          { ts:"2025-11-03 09:12", text:"Label created at origin facility" },
+          { ts:"2025-11-03 12:46", text:"Picked up by carrier" },
+          { ts:"2025-11-04 03:05", text:"Arrived at sorting center" },
+          { ts:"2025-11-04 08:20", text:"Departed sorting center" },
+          { ts:"2025-11-05 07:15", text:"Arrived at destination city" },
+          { ts:"2025-11-05 09:05", text:"Out for delivery" }
+        ]
+      }
+    };
+
+    // ---- UI actions ----
+    const input = document.getElementById('trkInput');
+    const checkBtn = document.getElementById('checkBtn');
+    const genBtn = document.getElementById('genBtn');
+    const msg = document.getElementById('msg');
+    const result = document.getElementById('result');
+    const resTrk = document.getElementById('resTrk');
+    const timeline = document.getElementById('timeline');
+    const resTitle = document.getElementById('resTitle');
+
+    function showMessage(text, type='muted'){ msg.textContent = text; msg.className = 'small ' + (type==='err' ? 'err' : (type==='warn' ? 'warn' : 'muted'));}
+
+    function renderTimeline(trk, data){
+      resTrk.textContent = trk;
+      resTitle.innerHTML = 'Tracking details — <span style="color:#111;font-weight:700">' + data.status + '</span>';
+      timeline.innerHTML = '';
+      for (const ev of data.timeline){
+        const div = document.createElement('div');
+        div.className = 'event';
+        div.innerHTML = `<div>${ev.text}</div><time>${ev.ts}</time>`;
+        timeline.appendChild(div);
+      }
+      result.style.display = 'block';
+      result.scrollIntoView({behavior:'smooth'});
+    }
+
+    checkBtn.addEventListener('click',()=>{
+      const trk = input.value.trim();
+      if (!trk){ showMessage('Please enter a tracking number.', 'warn'); return; }
+      const v = validateTrackingNumber(trk);
+      if (!v.ok){ showMessage(v.reason, 'err'); result.style.display='none'; return; }
+      showMessage('Tracking number format looks good.', 'muted');
+      if (shipments[trk]){
+        renderTimeline(trk, shipments[trk]);
+      } else {
+        // Unknown tracking number: show a friendly "not found" entry and let the user create it
+        result.style.display='block';
+        resTrk.textContent = trk;
+        resTitle.innerHTML = 'Tracking details — <span style="color:#b45309;font-weight:700">Not found</span>';
+        timeline.innerHTML = '<div class="event"><div>No shipment found for this tracking number in the current demo database.</div><time class="muted">Tip: generate a new number to create a demo shipment</time></div>';
+      }
+    });
+
+    genBtn.addEventListener('click',()=>{
+      // generate using today's date
+      const d = new Date();
+      const yyyy = d.getFullYear().toString().padStart(4,'0');
+      const mm = (d.getMonth()+1).toString().padStart(2,'0');
+      const dd = d.getDate().toString().padStart(2,'0');
+      const datePart = yyyy+mm+dd;
+      const randomPart = Math.floor(Math.random()*1_000_000).toString().padStart(6,'0');
+      const numeric = datePart + randomPart;
+      const check = luhnChecksumDigit(numeric);
+      const trk = `TRK-${datePart}-${randomPart}-${check}`;
+      input.value = trk;
+      showMessage('Generated a new tracking number. You can track it or save it.', 'muted');
+
+      // create a demo shipment for the generated number so it can be tracked immediately
+      shipments[trk] = {
+        status: "Label created",
+        timeline: [
+          { ts: `${yyyy}-${mm}-${dd} 08:00`, text: "Label created (demo)" }
+        ]
+      };
+      renderTimeline(trk, shipments[trk]);
+    });
+
+    // pre-fill the input with the sample generated for you
+    input.value = "TRK-20251103-482913-7";
+    showMessage('Ready — example tracking number pre-filled.');
+  </script>
+</body>
+</html>
